@@ -10,7 +10,7 @@ clean:
 	rm -rf $(OBJ)
 
 run: $(OBJ)rush
-	$(OBJ)rush
+	$(OBJ)rush 127.0.0.1 2020
 
 $(OBJ)rush: $(OBJ)rush.o
 	$(CC) -o $@ $<

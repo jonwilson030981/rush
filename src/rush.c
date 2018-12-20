@@ -29,7 +29,7 @@ typedef enum {
   read_result_err
 } read_result_t;
 
-int create_socket(char* host, char* port)
+int create_socket(char* host, int port)
 {
   int sock = -1;
   int ret = -1;
@@ -91,7 +91,7 @@ int create_socket(char* host, char* port)
       }
 
       struct hostent *server = gethostbyname(host);
-      int port_no = htons(atoi(port));
+      int port_no = htons(port);
       struct sockaddr_in addr =
       {
         .sin_family = AF_INET,
@@ -276,14 +276,8 @@ int run_parent(pid_t child_pid, int sock, pipes_t to_child, pipes_t from_child)
   int result = -1;
   read_result_t read_ret = read_result_err;
 
+  g_abort = false; 
   signal(SIGCHLD, signal_handler);
-  signal(SIGINT, signal_handler);
-
-  pid_t parent_pgid = getpgid(getpid());
-  dprintf(2, "PARENT PGID: %d\n", parent_pgid);
-
-  pid_t child_pgid = getpgid(child_pid);
-  dprintf(2, "CHILD_PGID: %d\n", child_pgid);
 
   ret = close(from_child.fd_write);
   if (ret < 0)
@@ -346,7 +340,7 @@ int run_parent(pid_t child_pid, int sock, pipes_t to_child, pipes_t from_child)
   return result;
 }
 
-int main(int argc, char** argv)
+int rush(char* server, int port)
 {
   int sock = -1;
   int ret = -1;
@@ -356,7 +350,7 @@ int main(int argc, char** argv)
 
   do
   {
-    sock = create_socket("127.0.0.1", "2020");
+    sock = create_socket(server, port);
     if (sock < 0)
     {
       perror("Failed to create_socket");
@@ -428,6 +422,18 @@ int main(int argc, char** argv)
     dprintf(2, "Waited  PID: %d\n", pid);
   }
 
+  if (to_child.fd_write > 0)
+  {
+    close(to_child.fd_write);
+    to_child.fd_write = -1;
+  }
+
+  if (from_child.fd_read > 0)
+  {
+    close(from_child.fd_read);
+    from_child.fd_read = -1;
+  }
+
   if(sock > 0)
   {
     ret = shutdown(sock, SHUT_RDWR);
@@ -446,4 +452,32 @@ int main(int argc, char** argv)
   }
 
   dprintf(STDERR_FILENO, "DONE\n");
+}
+
+int main(int argc, char** argv)
+{
+  int ret = -1;
+
+  if (argc < 3)
+  {
+    dprintf(2, "Usage: %s <server> <port>\n", basename(argv[0]));
+    return 1;
+  }
+
+  int port = atoi(argv[2]);
+  char* server = argv[1];
+
+  do {
+      int ret = rush(server, port);
+      if (ret < 0)
+      {
+        perror("Failed to rush");
+        return 1;
+      }
+
+      sleep(1);
+  } while(true);
+
+  return 0;
+
 }
