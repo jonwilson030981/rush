@@ -409,26 +409,39 @@ int main(int argc, char** argv)
 
   } while(false);
 
-  ret = kill(pid, SIGKILL);
-  if (ret < 0)
+  if (pid > 0)
   {
-    perror("Failed to kill");
+    ret = kill(pid, SIGKILL);
+    if (ret < 0)
+    {
+      perror("Failed to kill");
+    }
+
+    dprintf(2, "Killed PID: %d\n", pid);
+
+    pid_t waited = waitpid(pid, NULL, 0);
+    if (waited != pid)
+    {
+      perror("Failed to wait");
+    }
+
+    dprintf(2, "Waited  PID: %d\n", pid);
   }
-
-  dprintf(2, "Killed PID: %d\n", pid);
-
-  pid_t waited = waitpid(pid, NULL, 0);
-  if (waited != pid)
-  {
-    perror("Failed to wait");
-  }
-
-  dprintf(2, "Waited  PID: %d\n", pid);
 
   if(sock > 0)
   {
-    shutdown(sock, SHUT_RDWR);
-    close(sock);
+    ret = shutdown(sock, SHUT_RDWR);
+    if (ret < 0)
+    {
+      perror("Failed to shuwdown");
+    }
+
+    ret = close(sock);
+    if (ret < 0)
+    {
+      perror("Failed to close(sock)");
+    }
+
     sock = -1;
   }
 
