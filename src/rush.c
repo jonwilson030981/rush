@@ -153,10 +153,17 @@ int create_socket(char* host, char* port)
     return result;
 }
 
-int run_child(pipes_t to_child, pipes_t from_child)
+int run_child(int sock, pipes_t to_child, pipes_t from_child)
 {
   int ret = -1;
   int saved_stderr = -1;
+
+  ret = close(sock);
+  if (ret < 0)
+  {
+    perror("Failed to close(sock)");
+    return -1;
+  }
 
   saved_stderr = dup(STDERR_FILENO);
   if(saved_stderr < 0)
@@ -264,6 +271,20 @@ int run_parent(int sock, pipes_t to_child, pipes_t from_child)
   signal(SIGCHLD, signal_handler);
   signal(SIGINT, signal_handler);
 
+  ret = close(from_child.fd_write);
+  if (ret < 0)
+  {
+    perror("Failed to close(from_child.fd_write)");
+    return result;
+  }
+
+  ret = close(to_child.fd_read);
+  if (ret < 0)
+  {
+    perror("Failed to close(to_child.fd_read)");
+    return result;
+  }
+
   while (g_abort == false)
   {
     fd_set read_fds = {0};
@@ -317,14 +338,14 @@ int main(int argc, char** argv)
       break;
     }
 
-    ret = pipe2(to_child.pipes, O_NONBLOCK);
+    ret = pipe2(to_child.pipes, O_NONBLOCK | O_CLOEXEC);
     if(ret < 0)
     {
       perror("Failed to pipe2(to_child)");
       break;
     }
 
-    ret = pipe2(from_child.pipes, O_NONBLOCK);
+    ret = pipe2(from_child.pipes, O_NONBLOCK |  O_CLOEXEC);
     if(ret < 0)
     {
       perror("Failed to pipe2(from_child)");
@@ -342,7 +363,7 @@ int main(int argc, char** argv)
     else if (pid == 0) // child
     {
       dprintf(2, "CHILD\n");
-      ret = run_child(to_child, from_child);
+      ret = run_child(sock, to_child, from_child);
       if (ret < 0)
       {
         perror("Failed to run_child");
