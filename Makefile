@@ -2,12 +2,15 @@ PWD:=$(shell pwd)/
 SRC:=$(PWD)src/
 OBJ:=$(PWD)obj/
 
-.PHONY: all clean
+.PHONY: all clean run
 
 all: $(OBJ)rush
 
 clean:
 	rm -rf $(OBJ)
+
+run: $(OBJ)rush
+	$(OBJ)rush
 
 $(OBJ)rush: $(OBJ)rush.o
 	$(CC) -o $@ $<
