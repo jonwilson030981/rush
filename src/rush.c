@@ -156,7 +156,7 @@ int main(int argc, char** argv)
         break;
       }
 
-      ret = execl("/bin/sh", NULL);
+      ret = execl("/bin/sh", "-l", "-i", NULL);
       if (ret < 0)
       {
         dup2(saved_stderr, STDERR_FILENO);
