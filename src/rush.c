@@ -267,6 +267,13 @@ void signal_handler(int signal)
 {
   pid_t pid = getpid();
   dprintf(2, "Process: %d, Received Signal: %s\n", pid, strsignal(signal));
+
+  pid_t waited = wait(NULL);
+  if (waited < 0)
+  {
+    perror("Failed to wait");
+  }
+
   g_abort = true;
 }
 
@@ -276,7 +283,7 @@ int run_parent(pid_t child_pid, int sock, pipes_t to_child, pipes_t from_child)
   int result = -1;
   read_result_t read_ret = read_result_err;
 
-  g_abort = false; 
+  g_abort = false;
   signal(SIGCHLD, signal_handler);
 
   ret = close(from_child.fd_write);
@@ -373,7 +380,7 @@ int rush(char* server, int port)
 
     signal(SIGCHLD, SIG_DFL);
 
-    pid = vfork();
+    pid = fork();
     if (pid < 0) // error
     {
       perror("Failed to fork");
